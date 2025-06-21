@@ -14,6 +14,7 @@ type AuthContextType = {
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUserProfile: (avatarUrl?: string, displayName?: string) => void;
 };
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -78,8 +79,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
     }
   };
+
+  const updateUserProfile = (avatarUrl?: string, displayName?: string) => {
+    if (user) {
+      setUser({
+        ...user,
+        avatar_url: avatarUrl || user.avatar_url,
+        username: displayName || user.username
+      });
+    }
+  };
   return (
-    <AuthContext.Provider value={{ user, loading, error, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, error, login, logout, updateUserProfile }}>
       {children}
     </AuthContext.Provider>
   );
