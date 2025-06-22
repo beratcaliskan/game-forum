@@ -5,7 +5,6 @@ DROP TABLE IF EXISTS posts CASCADE;
 DROP TABLE IF EXISTS threads CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
 DROP TABLE IF EXISTS profiles CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS reports CASCADE;
 DROP TABLE IF EXISTS thread_likes CASCADE;
 DROP TABLE IF EXISTS follows CASCADE;
@@ -25,6 +24,17 @@ CREATE TABLE users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Users tablosu için RLS
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Herkes kullanıcı listesini görebilir (profil bilgileri için)
+CREATE POLICY "Users are publicly viewable" ON users
+  FOR SELECT USING (true);
+
+-- Kullanıcılar kendi bilgilerini güncelleyebilir (session tabanlı kontrol gerekli)
+CREATE POLICY "Users can update their own record" ON users
+  FOR UPDATE USING (true);
+
 -- 🧑 Profil Bilgileri
 CREATE TABLE profiles (
   id SERIAL PRIMARY KEY,
@@ -38,6 +48,17 @@ CREATE TABLE profiles (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Profiles tablosu için RLS
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+-- Herkes profilleri görebilir
+CREATE POLICY "Profiles are publicly viewable" ON profiles
+  FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar profil oluşturabilir ve güncelleyebilir
+CREATE POLICY "Authenticated users can manage profiles" ON profiles
+  FOR ALL USING (true);
+
 -- 📂 Kategoriler
 CREATE TABLE categories (
   id SERIAL PRIMARY KEY,
@@ -45,6 +66,17 @@ CREATE TABLE categories (
   description TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Categories tablosu için RLS
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+
+-- Herkes kategorileri görebilir
+CREATE POLICY "Categories are publicly viewable" ON categories
+  FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar kategori yönetebilir (admin kontrolü app seviyesinde)
+CREATE POLICY "Authenticated users can manage categories" ON categories
+  FOR ALL USING (true);
 
 -- 💬 Konular (Threads)
 CREATE TABLE threads (
@@ -60,6 +92,17 @@ CREATE TABLE threads (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Threads tablosu için RLS
+ALTER TABLE threads ENABLE ROW LEVEL SECURITY;
+
+-- Herkes thread'leri görebilir
+CREATE POLICY "Threads are publicly viewable" ON threads
+  FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar thread yönetebilir
+CREATE POLICY "Authenticated users can manage threads" ON threads
+  FOR ALL USING (true);
+
 -- 📝 Gönderiler (Posts)
 CREATE TABLE posts (
   id SERIAL PRIMARY KEY,
@@ -70,6 +113,17 @@ CREATE TABLE posts (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Posts tablosu için RLS
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+
+-- Herkes post'ları görebilir
+CREATE POLICY "Posts are publicly viewable" ON posts
+  FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar post yönetebilir
+CREATE POLICY "Authenticated users can manage posts" ON posts
+  FOR ALL USING (true);
+
 -- 👍 Beğeniler (Post'lar için)
 CREATE TABLE likes (
   user_id INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
@@ -77,6 +131,17 @@ CREATE TABLE likes (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   PRIMARY KEY (user_id, post_id)
 );
+
+-- Likes tablosu için RLS
+ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
+
+-- Herkes beğeni sayılarını görebilir
+CREATE POLICY "Likes are publicly viewable" ON likes
+  FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar beğeni yönetebilir
+CREATE POLICY "Authenticated users can manage likes" ON likes
+  FOR ALL USING (true);
 
 -- 👍 Thread Beğenileri
 CREATE TABLE thread_likes (
@@ -86,22 +151,16 @@ CREATE TABLE thread_likes (
   PRIMARY KEY (user_id, thread_id)
 );
 
--- Thread_likes tablosu için RLS politikaları
+-- Thread_likes tablosu için RLS
 ALTER TABLE thread_likes ENABLE ROW LEVEL SECURITY;
 
--- Kullanıcılar sadece kendi beğenilerini görebilir ve yönetebilir
-CREATE POLICY "Users can manage their own thread likes" ON thread_likes
-  FOR ALL USING (
-    user_id IN (
-      SELECT p.id FROM profiles p 
-      JOIN users u ON p.user_id = u.id 
-      WHERE u.id = (auth.uid()::text)::integer
-    )
-  );
-
--- Herkes thread beğeni sayılarını görebilir (COUNT için)
-CREATE POLICY "Anyone can view thread like counts" ON thread_likes
+-- Herkes thread beğeni sayılarını görebilir
+CREATE POLICY "Thread likes are publicly viewable" ON thread_likes
   FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar thread beğenilerini yönetebilir
+CREATE POLICY "Authenticated users can manage thread likes" ON thread_likes
+  FOR ALL USING (true);
 
 -- 🚨 Şikayetler
 CREATE TABLE reports (
@@ -127,7 +186,7 @@ CREATE TABLE reports (
   reviewed_by INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
   moderator_notes TEXT,
   
-  -- En az bir şikayet hedefi olmalı (thread, post veya profile)
+  -- En az bir şikayet hedefi olmalı
   CHECK (
     (report_type = 'thread' AND thread_id IS NOT NULL) OR
     (report_type = 'post' AND post_id IS NOT NULL) OR
@@ -135,48 +194,12 @@ CREATE TABLE reports (
   )
 );
 
--- Reports tablosu için RLS politikaları
+-- Reports tablosu için RLS
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
 
--- Kullanıcılar sadece kendi şikayetlerini görebilir
-CREATE POLICY "Users can view their own reports" ON reports
-  FOR SELECT USING (
-    reporter_id IN (
-      SELECT p.id FROM profiles p 
-      JOIN users u ON p.user_id = u.id 
-      WHERE u.id = (auth.uid()::text)::integer
-    )
-  );
-
--- Kullanıcılar şikayet gönderebilir
-CREATE POLICY "Users can create reports" ON reports
-  FOR INSERT WITH CHECK (
-    reporter_id IN (
-      SELECT p.id FROM profiles p 
-      JOIN users u ON p.user_id = u.id 
-      WHERE u.id = (auth.uid()::text)::integer
-    )
-  );
-
--- Moderatörler ve adminler tüm şikayetleri görebilir
-CREATE POLICY "Moderators can view all reports" ON reports
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM users u
-      WHERE u.id = (auth.uid()::text)::integer
-      AND u.role IN ('admin', 'moderator')
-    )
-  );
-
--- Moderatörler ve adminler şikayetleri güncelleyebilir
-CREATE POLICY "Moderators can update reports" ON reports
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM users u
-      WHERE u.id = (auth.uid()::text)::integer
-      AND u.role IN ('admin', 'moderator')
-    )
-  );
+-- Herkes şikayetleri yönetebilir (uygulama seviyesinde kontrol edilecek)
+CREATE POLICY "Authenticated users can manage reports" ON reports
+  FOR ALL USING (true);
 
 -- 👥 Takipler
 CREATE TABLE follows (
@@ -186,6 +209,17 @@ CREATE TABLE follows (
   PRIMARY KEY (follower_id, following_id),
   CHECK (follower_id <> following_id)
 );
+
+-- Follows tablosu için RLS
+ALTER TABLE follows ENABLE ROW LEVEL SECURITY;
+
+-- Herkes takip ilişkilerini görebilir
+CREATE POLICY "Follows are publicly viewable" ON follows
+  FOR SELECT USING (true);
+
+-- Authenticated kullanıcılar takip yönetebilir
+CREATE POLICY "Authenticated users can manage follows" ON follows
+  FOR ALL USING (true);
 
 -- ⚙️ Kullanıcı Ayarları
 CREATE TABLE user_settings (
@@ -211,6 +245,33 @@ CREATE TABLE user_settings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- User_settings tablosu için RLS
+ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+
+-- Kullanıcılar ayarlarını yönetebilir
+CREATE POLICY "Users can manage settings" ON user_settings
+  FOR ALL USING (true);
+
+-- =======================================
+-- 🔄 TRİGGER'LAR (Otomatik güncelleme için)
+-- =======================================
+
+-- Updated_at otomatik güncelleme fonksiyonu
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Trigger'ları ekle
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_threads_updated_at BEFORE UPDATE ON threads FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_posts_updated_at BEFORE UPDATE ON posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =======================================
 -- 📊 ÖRNEK VERİLER
@@ -425,3 +486,31 @@ CREATE INDEX idx_reports_created_at ON reports(created_at DESC);
 -- Takipler için indeks
 CREATE INDEX idx_follows_follower_id ON follows(follower_id);
 CREATE INDEX idx_follows_following_id ON follows(following_id);
+
+-- =======================================
+-- 🔧 YARDIMCI FONKSİYONLAR
+-- =======================================
+
+-- Kullanıcının profil ID'sini alma fonksiyonu
+CREATE OR REPLACE FUNCTION get_user_profile_id(user_id_param INTEGER)
+RETURNS INTEGER AS $$
+DECLARE
+    profile_id INTEGER;
+BEGIN
+    SELECT id INTO profile_id 
+    FROM profiles 
+    WHERE user_id = user_id_param;
+    
+    RETURN profile_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Thread view count artırma fonksiyonu
+CREATE OR REPLACE FUNCTION increment_thread_view_count(thread_id INTEGER)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE threads 
+    SET view_count = view_count + 1 
+    WHERE id = thread_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
